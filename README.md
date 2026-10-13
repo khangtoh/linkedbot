@@ -14,12 +14,15 @@ export LINKEDBOT_PASSPHRASE='a long passphrase'
 export ANTHROPIC_API_KEY=...
 npm run cli -- login        # headed browser, log in yourself
 npm run cli -- whoami
+npm run cli -- search "head of data fintech" 2   # scrape 2 result pages into data/leads.json
+npm run cli -- leads leads.csv                    # export (omit file to print a table)
 npm run cli -- agent "Summarize the profile at https://www.linkedin.com/in/someone"
 ```
 `HEADFUL=1` shows the browser during runs. If the session hits a login wall/checkpoint,
 automation stops with a clear error; re-run `login`.
 
 ## Layout
+- `leads.ts` deduped lead store + CSV export · `actions/search.ts` People search scraper
 - `vault.ts` encrypted session store · `limits.ts` daily caps + human delays
 - `browser.ts` session replay + health check · `actions/` typed actions
 - `agent.ts` Claude tool loop with an approval gate for side-effect actions

@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createInterface } from "node:readline/promises";
 import { openSession } from "./browser.js";
 import { viewProfile, whoami } from "./actions/profile.js";
+import { searchPeople } from "./actions/search.js";
+import { loadLeads } from "./leads.js";
 
 const MODEL = process.env.LINKEDBOT_MODEL ?? "claude-sonnet-5-5";
 
@@ -11,6 +13,20 @@ const tools: Anthropic.Tool[] = [
     name: "view_profile",
     description: "Read a LinkedIn profile (name, headline, about) by URL.",
     input_schema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+  },
+  {
+    name: "search_people",
+    description: "Search LinkedIn People by keywords (e.g. 'head of data fintech London'). Saves results as leads. Each page (~10 results) counts toward the daily search cap.",
+    input_schema: {
+      type: "object",
+      properties: { keywords: { type: "string" }, pages: { type: "number", description: "1-5, default 1" } },
+      required: ["keywords"],
+    },
+  },
+  {
+    name: "list_leads",
+    description: "List stored leads (no LinkedIn call). Optional case-insensitive filter over name/headline/location.",
+    input_schema: { type: "object", properties: { filter: { type: "string" }, limit: { type: "number" } } },
   },
 ];
 
@@ -51,7 +67,14 @@ export async function runAgent(task: string): Promise<void> {
             out = "Denied by user.";
           } else if (c.name === "whoami") out = await whoami(s.page);
           else if (c.name === "view_profile") out = await viewProfile(s.page, (c.input as any).url);
-          else out = `Unknown tool ${c.name}`;
+          else if (c.name === "search_people") out = await searchPeople(s.page, c.input as any);
+          else if (c.name === "list_leads") {
+            const { filter, limit } = c.input as { filter?: string; limit?: number };
+            const f = filter?.toLowerCase();
+            out = loadLeads()
+              .filter((l) => !f || `${l.name} ${l.headline} ${l.location}`.toLowerCase().includes(f))
+              .slice(0, limit ?? 25);
+          } else out = `Unknown tool ${c.name}`;
         } catch (e) {
           out = `Error: ${(e as Error).message}`;
         }
