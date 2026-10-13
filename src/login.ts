@@ -10,7 +10,7 @@ export async function captureLogin(): Promise<void> {
   await page.goto("https://www.linkedin.com/login");
   console.log("Log in in the browser window. Waiting for the feed...");
   await page.waitForURL(/linkedin\.com\/feed/, { timeout: 5 * 60_000 });
-  saveSession(await ctx.storageState());
+  saveSession(await ctx.storageState(), await page.evaluate(() => navigator.userAgent));
   await browser.close();
   console.log("Session saved to the encrypted vault.");
 }
