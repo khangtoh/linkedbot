@@ -48,7 +48,8 @@ scripts/deploy.sh deploy verify       # just the named stages (redeploy after a 
 ```
 The image is built remotely from the `Dockerfile`; no local Docker. The pipeline creates the
 project, a compute service `app` with a 1 Gi volume, and the secrets `LINKEDBOT_PASSPHRASE` and
-`LINKEDBOT_API_TOKEN` (generated once, never overwritten). `ANTHROPIC_API_KEY` is copied from your
+`LINKEDBOT_API_TOKEN` (generated once, never overwritten; the token is four random words, and
+`scripts/deploy.sh token` replaces it). `ANTHROPIC_API_KEY` is copied from your
 shell if exported. Read a value back with `insta secrets --print`.
 
 Everything except `/healthz` needs `Authorization: Bearer $LINKEDBOT_API_TOKEN`:
@@ -58,9 +59,22 @@ POST /jobs {"cmd":"whoami"} | {"cmd":"search","keywords":"...","pages":2} | {"cm
 GET  /jobs/<id>             -> status + result (jobs are async; poll)
 GET  /status · /leads · /leads.csv
 ```
+Full request and response schemas: `openapi.yaml` (OpenAPI 3.1).
 `insta run` injects the token without writing it to disk:
 ```
 insta run -- sh -c 'curl -s -X POST -H "Authorization: Bearer $LINKEDBOT_API_TOKEN" https://<app-url>/login'
 ```
+### Logging in (hosted)
+1. Start a login: `curl -s -X POST -H "Authorization: Bearer $LINKEDBOT_API_TOKEN" https://<app-url>/login`
+   returns `{"url": "https://<app-url>/login?t=...", "expiresInMinutes": 10}`.
+2. Open that `url` in any browser (a phone works). It shows the server's browser on LinkedIn's sign-in page.
+3. Tap a field and type your email and password, then complete any 2FA or security check in the same view.
+4. When LinkedIn reaches the feed, the page says "Logged in. Session saved." and the stream closes.
+5. Confirm: `GET /status` shows `"session": true`, or queue `{"cmd":"whoami"}`.
+
+The URL works for anyone who has it until the login finishes or 10 minutes pass, so don't share it.
+Only one login runs at a time; calling `POST /login` again returns the same URL. If it expires,
+call it again. Repeat the login whenever a job fails with "Session needs attention".
+
 Hosted runs come from a datacenter IP. Expect LinkedIn to challenge the login (complete it in the
 stream) and treat the account-restriction risk as higher than from your own machine.

@@ -2,6 +2,7 @@
 # Local package + deploy pipeline for InstaCloud.
 #   scripts/deploy.sh                 # every stage: check package provision secrets deploy verify
 #   scripts/deploy.sh check package   # only the named stages
+#   scripts/deploy.sh token           # extra stage: replace the API token (restarts the service)
 # The image is built remotely from the Dockerfile, so no local Docker is needed.
 # Every stage is safe to re-run: existing projects, services and secrets are left alone.
 # Env: INSTA (CLI command, default "insta"), LINKEDBOT_PROJECT, LINKEDBOT_SERVICE, LINKEDBOT_VOLUME_GI.
@@ -27,12 +28,26 @@ has_secret() {
     jq -e --arg n "$1" '[.. | strings, (objects | keys[])] | index($n) != null' >/dev/null
 }
 
-# Sets secret $1 once: from the local environment if exported, else generated when $2 is "generate".
+# Four random words (about 52 bits) from scripts/wordlist.txt, the EFF long wordlist (CC BY 3.0 US)
+# minus its hyphenated entries. Redrawn until it meets the server's 24-character minimum.
+gen_words() {
+  node -e '
+    const { randomInt } = require("node:crypto");
+    const words = require("node:fs").readFileSync(process.argv[1], "utf8").trim().split("\n");
+    let token;
+    do token = Array.from({ length: 4 }, () => words[randomInt(words.length)]).join("-");
+    while (token.length < 24);
+    console.log(token);
+  ' scripts/wordlist.txt
+}
+
+# Sets secret $1 once: from the local environment if exported, else generated when $2 is "hex" or "words".
 # Never overwrites: rotating LINKEDBOT_PASSPHRASE would make the saved session vault unreadable.
 ensure_secret() {
   local name=$1 value=${!1:-}
   if has_secret "$name"; then echo "  $name: already set"; return; fi
-  if [ -z "$value" ] && [ "${2:-}" = generate ]; then value=$(openssl rand -hex 32); fi
+  if [ -z "$value" ] && [ "${2:-}" = hex ]; then value=$(openssl rand -hex 32); fi
+  if [ -z "$value" ] && [ "${2:-}" = words ]; then value=$(gen_words); fi
   if [ -z "$value" ]; then echo "  $name: skipped (export it and re-run this stage to add it)"; return; fi
   printf '%s' "$value" | "${INSTA[@]}" secrets set "$name" >/dev/null
   echo "  $name: set"
@@ -63,9 +78,16 @@ stage_provision() {
 
 stage_secrets() {
   say "secrets: runtime configuration for compute/$SERVICE"
-  ensure_secret LINKEDBOT_PASSPHRASE generate # encrypts the session vault on the volume
-  ensure_secret LINKEDBOT_API_TOKEN generate  # bearer token for the HTTP API
-  ensure_secret ANTHROPIC_API_KEY             # only the "agent" job needs it
+  ensure_secret LINKEDBOT_PASSPHRASE hex  # encrypts the session vault on the volume
+  ensure_secret LINKEDBOT_API_TOKEN words # bearer token for the HTTP API
+  ensure_secret ANTHROPIC_API_KEY         # only the "agent" job needs it
+}
+
+# Not part of the default run: replaces the API token, which restarts the service.
+stage_token() {
+  say "token: replace LINKEDBOT_API_TOKEN with four new random words"
+  gen_words | "${INSTA[@]}" secrets set LINKEDBOT_API_TOKEN >/dev/null
+  echo "  LINKEDBOT_API_TOKEN: replaced. Read it with: insta secrets --print | grep LINKEDBOT_API_TOKEN"
 }
 
 stage_deploy() {
@@ -94,6 +116,6 @@ command -v jq >/dev/null || die "jq is required"
 STAGES=(check package provision secrets deploy verify)
 [ $# -gt 0 ] && STAGES=("$@")
 for s in "${STAGES[@]}"; do
-  declare -F "stage_$s" >/dev/null || die "unknown stage: $s (stages: check package provision secrets deploy verify)"
+  declare -F "stage_$s" >/dev/null || die "unknown stage: $s (stages: check package provision secrets deploy verify token)"
   "stage_$s"
 done

@@ -1,0 +1,416 @@
+openapi: 3.1.0
+info:
+  title: linkedbot API
+  version: 0.1.0
+  summary: HTTP front for the single-user LinkedIn agent (src/server.ts).
+  description: |
+    Every endpoint except `GET /healthz` and `GET /login` requires
+    `Authorization: Bearer $LINKEDBOT_API_TOKEN`.
+
+    Actions that drive the browser are asynchronous: `POST /jobs` answers `202` with a job,
+    and `GET /jobs/{id}` is polled for the result. Jobs run one at a time, in order. The
+    50 most recent are kept on disk, so a result survives the machine stopping when idle.
+
+    Daily caps (see `src/limits.ts`) apply to every action. A job that hits a cap or finds
+    the LinkedIn session logged out finishes with `status: error`.
+
+    **Not described here:** the login page opens a WebSocket at `/ws?t=<token>` (same
+    one-time token) that streams JPEG frames of the login browser as binary messages and
+    accepts JSON input events (`down`, `move`, `up`, `wheel`, `text`, `key`). OpenAPI
+    cannot model WebSockets; the page served by `GET /login` is the only intended client.
+servers:
+  - url: https://{host}
+    description: Hosted (InstaCloud compute/app). The host is the `domain` shown by `insta service list`.
+    variables:
+      host:
+        default: your-app.compute.instacloud-edge.com
+  - url: http://localhost:8080
+    description: Local (`npm run serve`)
+security:
+  - bearerAuth: []
+tags:
+  - name: service
+    description: Health and overview
+  - name: login
+    description: Capture a LinkedIn session through a streamed headless browser
+  - name: jobs
+    description: Queue browser actions and read their results
+  - name: leads
+    description: Leads collected by search jobs
+
+paths:
+  /healthz:
+    get:
+      tags: [service]
+      operationId: getHealth
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: The server is up.
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: ok
+
+  /status:
+    get:
+      tags: [service]
+      operationId: getStatus
+      summary: Session state, lead count and the 10 most recent jobs
+      responses:
+        "200":
+          description: Current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /login:
+    post:
+      tags: [login]
+      operationId: startLogin
+      summary: Start a remote login and get its one-time URL
+      description: |
+        Launches a headless browser on LinkedIn's sign-in page and returns a URL that streams
+        it. Open the URL on any device and log in; when the browser reaches the feed, the
+        session is saved to the encrypted vault and the stream closes.
+
+        Only one login runs at a time: calling this again while one is in progress returns
+        the same URL. The login is abandoned after 10 minutes.
+      responses:
+        "200":
+          description: Login browser is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginStart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          description: The browser could not be launched.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      tags: [login]
+      operationId: getLoginPage
+      summary: The streamed login page
+      description: |
+        HTML page that renders the login browser and forwards pointer and keyboard input.
+        Authenticated by the one-time token from `POST /login`, not by the bearer token.
+      security: []
+      parameters:
+        - name: t
+          in: query
+          required: true
+          description: One-time token from the `url` returned by `POST /login`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The login page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "403":
+          description: Missing or wrong token, or no login is in progress. Body is the plain text `forbidden`.
+
+  /jobs:
+    post:
+      tags: [jobs]
+      operationId: createJob
+      summary: Queue a browser action
+      description: |
+        The body is parsed as JSON whatever its `Content-Type`. Bodies over 64 kB are
+        rejected with `500`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobRequest"
+            examples:
+              whoami:
+                summary: Read the logged-in user's own profile
+                value: { cmd: whoami }
+              search:
+                summary: Scrape two pages of People search into leads
+                value: { cmd: search, keywords: head of data fintech, pages: 2 }
+              agent:
+                summary: Give Claude a task to carry out with the tools
+                value: { cmd: agent, task: "Summarize the profile at https://www.linkedin.com/in/someone" }
+      responses:
+        "202":
+          description: Job queued. Poll `GET /jobs/{id}`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          description: Unknown `cmd`, a missing required field, or a body that is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          description: Unexpected failure, including a body over 64 kB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /jobs/{id}:
+    get:
+      tags: [jobs]
+      operationId: getJob
+      summary: Read a job's status and result
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job id returned by `POST /jobs`.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{16}$"
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No such job (unknown id, or it aged out of the 50 kept).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /leads:
+    get:
+      tags: [leads]
+      operationId: listLeads
+      summary: All stored leads as JSON
+      responses:
+        "200":
+          description: Leads, oldest first, deduplicated by profile slug.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Lead"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /leads.csv:
+    get:
+      tags: [leads]
+      operationId: exportLeadsCsv
+      summary: All stored leads as CSV
+      responses:
+        "200":
+          description: "CSV with the header `name,headline,location,url,query,foundAt`; every value is double-quoted."
+          content:
+            text/csv:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: The `LINKEDBOT_API_TOKEN` secret (at least 24 characters).
+
+  responses:
+    Unauthorized:
+      description: Missing or wrong bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    Status:
+      type: object
+      required: [session, loginInProgress, leads, jobs]
+      properties:
+        session:
+          type: boolean
+          description: Whether a saved session exists in the vault. It may still have expired on LinkedIn's side.
+        loginInProgress:
+          type: boolean
+        leads:
+          type: integer
+          description: Number of stored leads.
+        jobs:
+          type: array
+          maxItems: 10
+          description: The 10 most recent jobs, oldest first, without input or result.
+          items:
+            type: object
+            required: [id, cmd, status, createdAt]
+            properties:
+              id: { type: string }
+              cmd: { $ref: "#/components/schemas/JobCommand" }
+              status: { $ref: "#/components/schemas/JobStatus" }
+              createdAt: { type: string, format: date-time }
+              finishedAt: { type: string, format: date-time }
+
+    LoginStart:
+      type: object
+      required: [url, expiresInMinutes]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: One-time page to open in a browser.
+        expiresInMinutes:
+          type: integer
+          const: 10
+
+    JobCommand:
+      type: string
+      enum: [whoami, search, agent]
+
+    JobStatus:
+      type: string
+      enum: [queued, running, done, error]
+
+    JobRequest:
+      oneOf:
+        - $ref: "#/components/schemas/WhoamiRequest"
+        - $ref: "#/components/schemas/SearchRequest"
+        - $ref: "#/components/schemas/AgentRequest"
+      discriminator:
+        propertyName: cmd
+        mapping:
+          whoami: "#/components/schemas/WhoamiRequest"
+          search: "#/components/schemas/SearchRequest"
+          agent: "#/components/schemas/AgentRequest"
+
+    WhoamiRequest:
+      type: object
+      required: [cmd]
+      properties:
+        cmd: { type: string, const: whoami }
+
+    SearchRequest:
+      type: object
+      required: [cmd, keywords]
+      properties:
+        cmd: { type: string, const: search }
+        keywords:
+          type: string
+          minLength: 1
+          description: People search keywords.
+        pages:
+          type: integer
+          minimum: 1
+          maximum: 5
+          default: 1
+          description: Result pages to scrape (about 10 results each). Values above 5 are capped at 5. Each page counts toward the daily search cap.
+
+    AgentRequest:
+      type: object
+      required: [cmd, task]
+      properties:
+        cmd: { type: string, const: agent }
+        task:
+          type: string
+          minLength: 1
+          description: Natural-language task for the Claude tool loop. Needs `ANTHROPIC_API_KEY` on the server.
+
+    Job:
+      type: object
+      required: [id, cmd, input, status, createdAt]
+      properties:
+        id:
+          type: string
+          pattern: "^[0-9a-f]{16}$"
+        cmd: { $ref: "#/components/schemas/JobCommand" }
+        input:
+          type: object
+          description: The request body without `cmd`.
+        status: { $ref: "#/components/schemas/JobStatus" }
+        result:
+          description: Present when `status` is `done`. Its shape depends on `cmd`.
+          oneOf:
+            - $ref: "#/components/schemas/WhoamiResult"
+            - $ref: "#/components/schemas/SearchResult"
+            - type: string
+              description: The agent's final answer (`cmd` = `agent`).
+        error:
+          type: string
+          description: Present when `status` is `error`.
+        createdAt: { type: string, format: date-time }
+        finishedAt:
+          type: string
+          format: date-time
+          description: Present once the job is `done` or `error`.
+
+    WhoamiResult:
+      type: object
+      required: [url, name, headline]
+      properties:
+        url: { type: string, format: uri }
+        name: { type: string }
+        headline: { type: string }
+
+    SearchResult:
+      type: object
+      required: [scraped, newLeads, sample]
+      properties:
+        scraped:
+          type: integer
+          description: Results read from the pages.
+        newLeads:
+          type: integer
+          description: How many of them were not already stored.
+        sample:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [name, headline, location, url]
+            properties:
+              name: { type: string }
+              headline: { type: string }
+              location: { type: string }
+              url: { type: string, format: uri }
+
+    Lead:
+      type: object
+      required: [slug, url, name, headline, location, query, foundAt]
+      properties:
+        slug:
+          type: string
+          description: The `/in/<slug>` part of the profile URL; the dedupe key.
+        url: { type: string, format: uri }
+        name: { type: string }
+        headline: { type: string }
+        location: { type: string }
+        query:
+          type: string
+          description: The search keywords that found this lead.
+        foundAt: { type: string, format: date-time }
