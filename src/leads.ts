@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { DATA_DIR } from "./vault.js";
+import { readJson, writeFileAtomic } from "./store.js";
 
 export type Lead = {
   slug: string; // /in/<slug>, the dedupe key
@@ -14,7 +14,7 @@ export type Lead = {
 const PATH = `${DATA_DIR}/leads.json`;
 
 export function loadLeads(): Lead[] {
-  return existsSync(PATH) ? (JSON.parse(readFileSync(PATH, "utf8")) as Lead[]) : [];
+  return readJson<Lead[]>(PATH, []);
 }
 
 // Merges new leads, skipping slugs already stored. Returns how many were new.
@@ -28,8 +28,7 @@ export function addLeads(incoming: Lead[]): number {
     all.push(l);
     added++;
   }
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(PATH, JSON.stringify(all, null, 2));
+  writeFileAtomic(PATH, JSON.stringify(all, null, 2));
   return added;
 }
 

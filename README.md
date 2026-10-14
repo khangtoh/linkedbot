@@ -25,10 +25,16 @@ automation stops with a clear error; re-run `login`.
 
 ## Layout
 - `leads.ts` deduped lead store + CSV export · `actions/search.ts` People search scraper
-- `vault.ts` encrypted session store · `limits.ts` daily caps + human delays
-- `browser.ts` session replay + health check · `actions/` typed actions
-- `agent.ts` Claude tool loop with an approval gate for side-effect actions
-- `server.ts` HTTP front for the same actions (hosted use) · `scripts/deploy.sh` InstaCloud pipeline
+- `vault.ts` encrypted session store · `limits.ts` daily caps, human delays, circuit breaker
+- `browser.ts` one shared browser lease, session replay, cookie write-back · `actions/` typed actions
+- `policy.ts` read-only network guard (`LINKEDBOT_GUARD=observe|enforce`) · `store.ts` crash-safe files
+- `ops/` operation registry: built-ins, chained tools (`chain.ts`, JSONata in `expr.ts`), runner
+- `agent.ts` Claude tool loop over the published operations
+- `server.ts` HTTP API · `mcp.ts` MCP endpoint · `oauth.ts` OAuth sign-in for hosted MCP clients
+- `auth.ts` token checks and rate limiting · `jobs.ts` serial, persisted job queue
+- `ops/preview.ts` studio previews · `static.ts` serves the studio · `gen/` the API generator
+- `web/` the studio (Vite + React) · `docs/journeys/` user journeys
+- `scripts/deploy.sh` InstaCloud pipeline · `scripts/smoke.ts` checks a deployed service
 
 ## Remote login (`login --remote`)
 Runs Chromium headless and streams it to a web page you open from any device (phone included).
@@ -78,3 +84,51 @@ call it again. Repeat the login whenever a job fails with "Session needs attenti
 
 Hosted runs come from a datacenter IP. Expect LinkedIn to challenge the login (complete it in the
 stream) and treat the account-restriction risk as higher than from your own machine.
+
+## Studio
+`https://<app-url>/studio/` is a phone-first web app for the same operations: sign in with the
+four-word token, log in to LinkedIn, browse and run operations, build tools by chaining them (with
+real previews of each step), generate APIs, and see runs and leads. Design context is in
+`PRODUCT.md` and `DESIGN.md`; `node scripts/contrast.mjs` checks the colour tokens. Develop with
+`npm run serve` and `npm run dev:web`; `npm run build:web` builds it into `web/dist`.
+
+## MCP server
+The hosted service is also an MCP server at `https://<app-url>/mcp` (Streamable HTTP; both the
+2025 and 2026 protocol versions). Every published operation is a tool, plus `list_operations`,
+`run_operation`, `get_job`, `define_tool` and `remove_tool`. Everything is read-only on LinkedIn.
+
+**Clients that send a header** (Claude Code, Cursor, VS Code, Gemini CLI, the Anthropic and OpenAI
+APIs, Claude Desktop through `mcp-remote`): use `Authorization: Bearer <four-word token>`.
+```
+claude mcp add --transport http linkedbot https://<app-url>/mcp --header "Authorization: Bearer $LINKEDBOT_API_TOKEN"
+```
+
+**claude.ai and ChatGPT** cannot send a header. Add a custom connector with the URL
+`https://<app-url>/mcp` and no client id; a sign-in page opens and asks for the four-word token.
+The client then holds its own tokens. Replacing the API token (`scripts/deploy.sh token`)
+disconnects every OAuth client.
+
+Calls that take longer than about 45 seconds return a `job_id`; `get_job` waits for the result.
+
+### Tools made by chaining operations
+`define_tool` (MCP) or `POST /api/ops` (HTTP) saves a tool: steps that call other operations, with
+`{ "$expr": "<JSONata>" }` values to pass data between them and `forEach` loops (limit 1-25).
+The `define_tool` description has a full example. Tools are checked when saved (unknown operations,
+missing inputs, references to later steps, loops between tools) and before they run (worst-case
+spend against today's caps). User journeys for this and what comes next are in `docs/journeys/`.
+
+### Generating an API (early)
+`generate_api` writes a read-only recipe for a LinkedIn page from a description and saves it as a
+draft. It runs on the server, where the LinkedIn session is, and needs `ANTHROPIC_API_KEY`:
+```
+curl -s -X POST -H "Authorization: Bearer $LINKEDBOT_API_TOKEN" $BOT/jobs \
+  -d '{"cmd":"generate_api","description":"Company name, industry, size and website","exampleUrl":"https://www.linkedin.com/company/anthropic/about/","budget":5}'
+```
+Poll `GET /jobs/<id>`; the result lists what the generator did, the output it got, and the draft's
+name. Review the draft with `GET /api/ops/<name>?draft`. Publishing it (`POST /api/ops/<name>/publish`)
+makes it an MCP tool and a `POST /jobs` command like any other.
+
+### Tests
+`npm test` runs the unit and integration tests (real Chromium against local pages; no LinkedIn).
+`scripts/deploy.sh verify` runs `scripts/smoke.ts` against the deployed service. Set
+`LINKEDBOT_BRANCH=<name>` to deploy to and verify an InstaCloud preview branch instead of main.

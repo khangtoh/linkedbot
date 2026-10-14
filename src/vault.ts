@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { writeFileAtomic } from "./store.js";
 
 export const DATA_DIR = process.env.LINKEDBOT_DATA ?? "data";
 const VAULT_PATH = `${DATA_DIR}/session.vault`;
@@ -25,12 +25,16 @@ function writeEncrypted(payload: unknown): void {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", scryptSync(passphrase(), salt, 32), iv);
   const enc = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
-  mkdirSync(dirname(VAULT_PATH), { recursive: true });
-  writeFileSync(VAULT_PATH, Buffer.concat([salt, iv, cipher.getAuthTag(), enc]), { mode: 0o600 });
+  writeFileAtomic(VAULT_PATH, Buffer.concat([salt, iv, cipher.getAuthTag(), enc]), 0o600);
 }
 
 export function hasSession(): boolean {
   return existsSync(VAULT_PATH);
+}
+
+// Changes whenever the vault is rewritten, so a browser context built from an older session can be replaced.
+export function sessionVersion(): number {
+  return existsSync(VAULT_PATH) ? statSync(VAULT_PATH).mtimeMs : 0;
 }
 
 export function loadSession(): StoredSession {

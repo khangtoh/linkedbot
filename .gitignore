@@ -20,3 +20,4 @@ dist/
 .agents/skills/
 .github/skills/
 skills-lock.json
+web/dist/

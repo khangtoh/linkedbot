@@ -3,7 +3,7 @@ import { assertHealthy } from "../browser.js";
 import { addLeads, type Lead } from "../leads.js";
 import { consume, humanDelay } from "../limits.js";
 
-export type SearchOpts = { keywords: string; pages?: number };
+export type SearchOpts = { keywords: string; pages?: number; onPage?: (page: number, of: number) => void };
 
 type Raw = { slug: string; name: string; lines: string[] };
 
@@ -31,9 +31,10 @@ async function scrapePage(page: Page): Promise<Raw[]> {
 }
 
 // Searches People and stores the results as leads. Each results page counts as one "search".
-export async function searchPeople(page: Page, { keywords, pages = 1 }: SearchOpts) {
+export async function searchPeople(page: Page, { keywords, pages = 1, onPage }: SearchOpts) {
   const found: Lead[] = [];
   for (let p = 1; p <= Math.min(pages, 5); p++) {
+    onPage?.(p, Math.min(pages, 5));
     consume("search");
     const url = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(keywords)}&page=${p}`;
     await page.goto(url, { waitUntil: "domcontentloaded" });
