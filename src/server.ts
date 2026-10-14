@@ -13,6 +13,7 @@ import { handleMcp } from "./mcp.js";
 import { challengeHeader, handleOAuth, mcpResource } from "./oauth.js";
 import { previewTool } from "./ops/preview.js";
 import { serveStudio } from "./static.js";
+import { claudeSettings, saveClaudeSettings, testClaude } from "./claude.js";
 
 // Long-lived HTTP front for the same actions the CLI runs, so the bot can live on a host
 // that expects a server (container platforms). Everything except /healthz and the one-time
@@ -161,6 +162,17 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && pathname.startsWith("/jobs/")) {
       const job = getJob(pathname.slice("/jobs/".length));
       return job ? json(res, 200, job) : json(res, 404, { error: "No such job." });
+    }
+    // Claude: key status, the model each feature uses, and a tiny connection test.
+    if (route === "GET /claude") return json(res, 200, claudeSettings());
+    if (route === "PUT /claude") {
+      const saved = saveClaudeSettings((await readJson(req)) ?? {});
+      return saved.ok ? json(res, 200, claudeSettings()) : json(res, 400, { error: saved.error });
+    }
+    if (route === "POST /claude/test") {
+      const { model } = (await readJson(req)) ?? {};
+      if (model !== undefined && !claudeSettings().models.some((m) => m.id === model)) return json(res, 400, { error: "Unknown model." });
+      return json(res, 200, await testClaude(model));
     }
     if (route === "GET /leads") return json(res, 200, loadLeads());
     if (route === "GET /leads.csv") return void res.writeHead(200, { "content-type": "text/csv" }).end(leadsToCsv(loadLeads()));

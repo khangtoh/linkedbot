@@ -1,7 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { modelFor } from "./claude.js";
 import type { RunContext } from "./ops/types.js";
-
-const MODEL = process.env.LINKEDBOT_MODEL ?? "claude-sonnet-5-5";
 
 // Claude tool loop over the published operations (built-ins, generated APIs and tools alike).
 // Everything it can call is read-only, so there is no per-call approval step.
@@ -13,11 +12,12 @@ export async function runAgent(task: string, ctx: RunContext): Promise<string> {
     .filter((op) => !(op.kind === "builtin" && op.hidden?.agent))
     .map((op) => ({ name: op.name, description: op.description, input_schema: op.inputSchema as Anthropic.Tool.InputSchema }));
   const client = new Anthropic();
+  const model = modelFor("agent"); // fixed for the whole run
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: task }];
   for (let turn = 0; turn < 15; turn++) {
     ctx.progress(turn === 0 ? "Thinking about the task" : "Thinking about the next step");
     const res = await client.messages.create({
-      model: MODEL,
+      model,
       max_tokens: 2048,
       system: "You operate the user's own LinkedIn account via tools. Be sparing: every call counts against daily limits.",
       tools,

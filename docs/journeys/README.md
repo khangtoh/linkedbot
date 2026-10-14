@@ -10,6 +10,7 @@ Status: **draft** (written, not built), **building**, **built** (works and is te
 | 3 | [Compose a tool by chaining APIs](03-compose-tool.md) | Studio, MCP | built: studio builder (QA'd on phone and desktop) and `define_tool` over MCP |
 | 4 | [Generate a missing API](04-generate-api.md) | Studio, MCP | building: generator works on test pages and has a first studio screen; live LinkedIn spike, live view and pointing pending |
 | 5 | [Run things and read results](05-run-and-results.md) | Studio, MCP, HTTP API | built: Library, run sheet, Activity and Leads in the studio; MCP and HTTP |
+| 6 | [Check and tune the Claude connection](06-claude-settings.md) | Studio, HTTP API | building: key status, per-feature model, connection test |
 
 ## Who this is for
 

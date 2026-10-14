@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Page } from "playwright";
 import { acquire, assertHealthy, type Lease } from "../browser.js";
+import { modelFor, supportsFallbacks } from "../claude.js";
 import { consume, humanDelay, remaining } from "../limits.js";
 import { checkNavigation, LINKEDIN_POLICY, type Policy } from "../policy.js";
 import { runRecipeOnPage, validateRecipe, type RecipeDef } from "../ops/recipe.js";
@@ -34,8 +35,6 @@ export type GenOptions = {
   maxTurns?: number;
   hints?: () => string[]; // owner corrections queued since the last turn ("correct by pointing")
 };
-
-const MODEL = process.env.LINKEDBOT_GEN_MODEL ?? "claude-opus-5-5";
 
 const SYSTEM = `You build read-only "APIs" for LinkedIn: small declarative recipes that open a LinkedIn page and extract data from it. The owner of the account is watching the browser while you work.
 
@@ -199,6 +198,7 @@ export class GenerationSession {
     const left = remaining();
     if (left.view_profile < budget) return this.fail(`Only ${left.view_profile} profile views are left today; a generation may use up to ${budget}.`);
     const client = this.opts.client ?? new Anthropic();
+    const model = this.opts.model ?? modelFor("generator"); // fixed for the whole run
     this.emit({ type: "status", text: "Waiting for the browser" });
     this.lease = await acquire("interactive", "API generator");
     try {
@@ -211,10 +211,9 @@ export class GenerationSession {
         const hints = this.opts.hints?.() ?? [];
         if (hints.length) messages.push({ role: "user", content: `The owner pointed at the page:\n${hints.join("\n")}` });
         const res = await client.beta.messages.create({
-          model: this.opts.model ?? MODEL,
+          model,
           max_tokens: 16000,
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
+          ...(supportsFallbacks(model) ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
           thinking: { type: "adaptive" },
           output_config: { effort: "high" },
           cache_control: { type: "ephemeral" },

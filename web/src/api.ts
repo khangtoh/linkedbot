@@ -19,6 +19,15 @@ export type JobStatus = "queued" | "running" | "done" | "error";
 export type Progress = { stage: "queued" | "waiting" | "working"; message: string; since: string };
 export type JobSummary = { id: string; cmd: string; status: JobStatus; createdAt: string; startedAt?: string; finishedAt?: string; progress?: Progress; error?: string };
 export type Job<R = unknown> = JobSummary & { input: unknown; result?: R };
+export type ClaudeFeature = { model: string; default: string; chosen: boolean };
+export type ClaudeSettings = {
+  configured: boolean;
+  source: "ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN" | null;
+  keyHint: string | null;
+  models: { id: string; label: string; price: string }[];
+  features: { agent: ClaudeFeature; generator: ClaudeFeature };
+};
+export type ClaudeTest = { ok: boolean; model: string; ms: number; reply?: string; tokens?: number; error?: string };
 export type Lead = { slug: string; url: string; name: string; headline: string; location: string; query: string; foundAt: string };
 
 export class ApiError extends Error {
@@ -63,6 +72,10 @@ export const api = {
   job: <R = unknown>(id: string) => call<Job<R>>("GET", `/jobs/${id}`),
   preview: (def: unknown, input: unknown, loopCap = 2) => call<Job<PreviewResult>>("POST", "/preview", { def, input, loopCap }),
   leads: () => call<Lead[]>("GET", "/leads"),
+  claude: () => call<ClaudeSettings>("GET", "/claude"),
+  // null puts a feature back on its default model
+  setClaudeModels: (models: Partial<Record<"agent" | "generator", string | null>>) => call<ClaudeSettings>("PUT", "/claude", models),
+  testClaude: (model?: string) => call<ClaudeTest>("POST", "/claude/test", model ? { model } : {}),
   startLogin: () => call<{ url: string; expiresInMinutes: number }>("POST", "/login"),
 };
 

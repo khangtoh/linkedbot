@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, type ClaudeSettings, type ClaudeTest } from "../api";
 import { Icon } from "../icons";
-import { Button, linkedinState, Note, useStatus } from "../ui";
+import { Button, Field, linkedinState, Note, Skeleton, useAsync, useStatus } from "../ui";
 
 const ACCENTS = [
   { key: "terracotta", label: "Terracotta", swatch: "oklch(56% 0.14 40)" },
@@ -18,6 +18,7 @@ export function Settings() {
       </div>
       <div className="stack" style={{ "--gap": "36px", maxWidth: "44rem" } as React.CSSProperties}>
         <LinkedIn />
+        <Claude />
         <ConnectClient />
         <Appearance />
         <Account />
@@ -73,6 +74,111 @@ function LinkedIn() {
       <p className="small muted">The login page opens in a new tab and works for 10 minutes. Email and password work; Google and Apple buttons may not.</p>
       {error && <Note tone="danger">{error}</Note>}
       <Note icon="shield">Everything linkedbot runs is read-only on LinkedIn: it can't post, connect or message. Viewing a profile is still visible to its owner.</Note>
+    </section>
+  );
+}
+
+const FEATURES = [
+  { key: "agent", label: "Agent", hint: "Used by “Ask the agent”." },
+  { key: "generator", label: "API generator", hint: "Used by “Generate an API”. Stronger models write better selectors." },
+] as const;
+
+function Claude() {
+  const { data, error, loading, reload } = useAsync(api.claude, []);
+  const [settings, setSettings] = useState<ClaudeSettings>();
+  const [saveError, setSaveError] = useState<string>();
+  const [testing, setTesting] = useState(false);
+  const [test, setTest] = useState<ClaudeTest>();
+  const s = settings ?? data;
+  const label = (id: string) => s?.models.find((m) => m.id === id)?.label ?? id;
+
+  async function pick(feature: "agent" | "generator", value: string) {
+    setSaveError(undefined);
+    setTest(undefined);
+    try {
+      setSettings(await api.setClaudeModels({ [feature]: value || null }));
+    } catch (e) {
+      setSaveError(e instanceof ApiError ? e.message : "Couldn't save the model.");
+    }
+  }
+  async function runTest() {
+    setTesting(true);
+    setTest(undefined);
+    try {
+      setTest(await api.testClaude(s?.features.agent.model));
+    } catch (e) {
+      setTest({ ok: false, model: s?.features.agent.model ?? "", ms: 0, error: e instanceof ApiError ? e.message : "The test didn't run." });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <section className="stack" aria-labelledby="set-claude">
+      <h2 id="set-claude">Claude</h2>
+      {loading && !s && <Skeleton lines={2} />}
+      {error && !s && (
+        <Note tone="danger">
+          Couldn't load the Claude settings. <Button size="small" variant="quiet" onClick={reload}>Try again</Button>
+        </Note>
+      )}
+      {s && (
+        <>
+          <div className="row">
+            <span className={`pill ${s.configured ? "ok" : "warn"}`}>
+              <Icon name={s.configured ? "check" : "alert"} size={14} /> {s.configured ? "Enabled" : "Not set"}
+            </span>
+            {s.configured && (
+              <span className="small muted">
+                {s.keyHint && <code className="mono">{s.keyHint}</code>} from {s.source}
+              </span>
+            )}
+          </div>
+          <p className="muted prose">“Ask the agent” and “Generate an API” use the Claude API with a key kept on the server. The key never reaches this page.</p>
+          {!s.configured && (
+            <Note tone="warn">
+              Set <code className="mono">ANTHROPIC_API_KEY</code> on the server: export it and run <code className="mono">scripts/deploy.sh secrets deploy</code>, or export it before <code className="mono">npm run serve</code> locally.
+            </Note>
+          )}
+          {FEATURES.map((f) => {
+            const cur = s.features[f.key];
+            return (
+              <Field key={f.key} label={f.label} hint={f.hint}>
+                {(props) => (
+                  <select {...props} className="input" value={cur.chosen ? cur.model : ""} onChange={(e) => pick(f.key, e.target.value)}>
+                    <option value="">Default ({label(cur.default)})</option>
+                    {s.models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label} · {m.price}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+            );
+          })}
+          <p className="small muted">Prices are per million input / output tokens. A change applies from the next run.</p>
+          {saveError && <Note tone="danger">{saveError}</Note>}
+          <div className="row">
+            <Button icon="play" loading={testing} disabled={!s.configured} onClick={runTest}>
+              Test connection
+            </Button>
+            <span className="small muted">One tiny request to {label(s.features.agent.model)}, a few dozen tokens.</span>
+          </div>
+          {test && (
+            <div aria-live="polite">
+              {test.ok ? (
+                <Note tone="ok">
+                  Connected to {label(test.model)} in {(test.ms / 1000).toFixed(1)} s{test.tokens !== undefined && `, ${test.tokens} tokens`}.
+                  {test.reply && <> It replied “{test.reply}”.</>}
+                </Note>
+              ) : (
+                <Note tone="danger">{test.error}</Note>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </section>
   );
 }

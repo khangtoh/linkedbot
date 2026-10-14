@@ -37,6 +37,8 @@ tags:
     description: Queue browser actions and read their results
   - name: leads
     description: Leads collected by search jobs
+  - name: claude
+    description: Claude API key status, the model each feature uses, and a connection test
 
 paths:
   /healthz:
@@ -228,6 +230,88 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /claude:
+    get:
+      tags: [claude]
+      operationId: getClaudeSettings
+      summary: Whether the server has a Claude key, and the model each feature uses
+      description: The key itself is never returned; `keyHint` shows its last four characters.
+      responses:
+        "200":
+          description: Current settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaudeSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [claude]
+      operationId: setClaudeModels
+      summary: Choose the model for the agent and/or the API generator
+      description: A model id from `models`; `null` puts the feature back on its default (`LINKEDBOT_MODEL` / `LINKEDBOT_GEN_MODEL`, else Sonnet 5.5 / Opus 5.5). Applies from the next run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent: { type: [string, "null"], example: claude-haiku-5-5 }
+                generator: { type: [string, "null"], example: claude-opus-5-5 }
+      responses:
+        "200":
+          description: Settings after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaudeSettings"
+        "400":
+          description: Unknown model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /claude/test:
+    post:
+      tags: [claude]
+      operationId: testClaude
+      summary: Send one tiny request to Claude (64-token cap, low effort)
+      description: Uses the agent's model unless `model` is given. A failed call still answers 200 with `ok:false` and a plain-language `error`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model: { type: string, example: claude-sonnet-5-5 }
+      responses:
+        "200":
+          description: Outcome of the test.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, model, ms]
+                properties:
+                  ok: { type: boolean }
+                  model: { type: string }
+                  ms: { type: integer, description: Round trip in milliseconds }
+                  reply: { type: string }
+                  tokens: { type: integer, description: Input plus output tokens }
+                  error: { type: string }
+        "400":
+          description: Unknown model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -244,6 +328,31 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    ClaudeFeature:
+      type: object
+      properties:
+        model: { type: string, description: Model the next run will use }
+        default: { type: string, description: Model used when nothing is chosen }
+        chosen: { type: boolean, description: Whether the owner picked a model }
+    ClaudeSettings:
+      type: object
+      properties:
+        configured: { type: boolean, description: ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is set on the server }
+        source: { type: [string, "null"], enum: [ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, null] }
+        keyHint: { type: [string, "null"], example: "sk-ant-…WXYZ" }
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              label: { type: string }
+              price: { type: string, description: USD per million input / output tokens }
+        features:
+          type: object
+          properties:
+            agent: { $ref: "#/components/schemas/ClaudeFeature" }
+            generator: { $ref: "#/components/schemas/ClaudeFeature" }
     Error:
       type: object
       required: [error]
