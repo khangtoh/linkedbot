@@ -85,6 +85,7 @@ stage_secrets() {
   ensure_secret LINKEDBOT_PASSPHRASE hex  # encrypts the session vault on the volume
   ensure_secret LINKEDBOT_API_TOKEN words # bearer token for the HTTP API
   ensure_secret ANTHROPIC_API_KEY         # only the "agent" job needs it
+  ensure_secret ANTHROPIC_WORKSPACE_ID    # only for a key that is not scoped to a workspace
 }
 
 # Not part of the default run: replaces the API token, which restarts the service.

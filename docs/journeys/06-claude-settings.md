@@ -36,6 +36,7 @@ error. Also when they want a cheaper or stronger model for one of the two Claude
 | No key | "Not set" pill, how to set it; pickers still work; Test is disabled. |
 | Key set | "Enabled" pill, `sk-ant-…abcd`. |
 | Test passes | "Connected to Claude Sonnet 5.5 in 0.8 s, 23 tokens." |
+| Key not scoped to a workspace (400) | "This key isn't scoped to a workspace. Set ANTHROPIC_WORKSPACE_ID on the server, or use a workspace-scoped key." When it is set, the status line shows the workspace. |
 | Key rejected (401) | "The key was rejected. Check ANTHROPIC_API_KEY." |
 | Model not available to the key (403/404) | "This key can't use Claude Fable 5.1. Pick another model." |
 | Rate limited / overloaded | "Claude is busy or rate-limited. Try again in a minute." |

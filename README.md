@@ -56,7 +56,7 @@ The image is built remotely from the `Dockerfile`; no local Docker. The pipeline
 project, a compute service `app` with a 1 Gi volume, and the secrets `LINKEDBOT_PASSPHRASE` and
 `LINKEDBOT_API_TOKEN` (generated once, never overwritten; the token is four random words, and
 `scripts/deploy.sh token` replaces it). `ANTHROPIC_API_KEY` is copied from your
-shell if exported. Read a value back with `insta secrets --print`.
+shell if exported, and so is `ANTHROPIC_WORKSPACE_ID` (needed only when the key is not scoped to a workspace). Read a value back with `insta secrets --print`.
 
 Everything except `/healthz` needs `Authorization: Bearer $LINKEDBOT_API_TOKEN`:
 ```

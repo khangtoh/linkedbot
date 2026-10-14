@@ -24,6 +24,7 @@ export type ClaudeSettings = {
   configured: boolean;
   source: "ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN" | null;
   keyHint: string | null;
+  workspace: string | null;
   models: { id: string; label: string; price: string }[];
   features: { agent: ClaudeFeature; generator: ClaudeFeature };
 };

@@ -24,6 +24,13 @@ const load = () => readJson<Partial<Record<Feature, string>>>(PATH, {});
 
 export const modelFor = (feature: Feature): string => load()[feature] || DEFAULTS[feature]();
 
+// A key that isn't scoped to a workspace has to name one on every request.
+const workspace = () => process.env.ANTHROPIC_WORKSPACE_ID?.trim() || undefined;
+export function claudeClient(opts: NonNullable<ConstructorParameters<typeof Anthropic>[0]> = {}): Anthropic {
+  const ws = workspace();
+  return new Anthropic(ws ? { ...opts, defaultHeaders: { "anthropic-workspace-id": ws, ...opts.defaultHeaders } } : opts);
+}
+
 const label = (id: string) => MODELS.find((m) => m.id === id)?.label ?? id;
 
 // Server-side refusal fallback ("default" routing) is not offered for Haiku.
@@ -44,6 +51,7 @@ export function claudeSettings() {
     configured: !!k,
     source: k?.source ?? null,
     // Enough to tell two keys apart; short values show nothing.
+    workspace: workspace() ?? null,
     keyHint: k && k.value.length >= 16 ? `${k.value.startsWith("sk-ant-") ? "sk-ant-" : ""}…${k.value.slice(-4)}` : null,
     models: MODELS,
     features: { agent: feature("agent"), generator: feature("generator") },
@@ -70,7 +78,7 @@ export type TestResult = { ok: boolean; model: string; ms: number; reply?: strin
 // proves the key and the model work.
 export async function testClaude(model = modelFor("agent")): Promise<TestResult> {
   if (!key()) return { ok: false, model, ms: 0, error: "No API key on the server. Set ANTHROPIC_API_KEY and restart." };
-  const client = new Anthropic({ timeout: 20_000, maxRetries: 0 });
+  const client = claudeClient({ timeout: 20_000, maxRetries: 0 });
   const started = Date.now();
   try {
     const res = await client.messages.create({
@@ -87,6 +95,7 @@ export async function testClaude(model = modelFor("agent")): Promise<TestResult>
 }
 
 function explain(e: unknown, model: string): string {
+  if (e instanceof Anthropic.BadRequestError && /anthropic-workspace-id/.test(e.message)) return "This key isn't scoped to a workspace. Set ANTHROPIC_WORKSPACE_ID on the server, or use a workspace-scoped key.";
   if (e instanceof Anthropic.AuthenticationError) return "The key was rejected. Check ANTHROPIC_API_KEY.";
   if (e instanceof Anthropic.PermissionDeniedError || e instanceof Anthropic.NotFoundError) return `This key can't use ${label(model)}. Pick another model.`;
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limiting this key. Try again in a minute.";

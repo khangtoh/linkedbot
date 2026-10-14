@@ -12,6 +12,8 @@ export function explainError(raw: string | undefined): Explained {
     return { title: "Today's limit is used up", detail: `${msg.replace(/\.$/, "")}. Daily caps keep your account safe and reset at midnight UTC.` };
   if (/Interrupted by a restart/i.test(msg))
     return { title: "Interrupted", detail: "The server restarted while this was running. Nothing was lost; run it again.", action: { label: "Run again", retry: true } };
+  if (/anthropic-workspace-id/i.test(msg))
+    return { title: "The Claude key needs a workspace", detail: "This key isn't scoped to a workspace. Set ANTHROPIC_WORKSPACE_ID on the server, or use a workspace-scoped key.", action: { label: "Check Claude settings", to: "/settings" } };
   if (/ANTHROPIC_API_KEY|api[_ -]?key|authentication_error|x-api-key|401 .*anthropic/i.test(msg))
     return { title: "The Claude API key is missing or wrong", detail: "This uses Claude. Set ANTHROPIC_API_KEY on the server (scripts/deploy.sh secrets) and try again.", action: { label: "Check Claude settings", to: "/settings" } };
   if (/timed? ?out|Timeout|net::ERR|ERR_/i.test(msg))

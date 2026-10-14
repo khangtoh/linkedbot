@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { modelFor } from "./claude.js";
+import { claudeClient, modelFor } from "./claude.js";
 import type { RunContext } from "./ops/types.js";
 
 // Claude tool loop over the published operations (built-ins, generated APIs and tools alike).
@@ -11,7 +11,7 @@ export async function runAgent(task: string, ctx: RunContext): Promise<string> {
   const tools: Anthropic.Tool[] = listOps()
     .filter((op) => !(op.kind === "builtin" && op.hidden?.agent))
     .map((op) => ({ name: op.name, description: op.description, input_schema: op.inputSchema as Anthropic.Tool.InputSchema }));
-  const client = new Anthropic();
+  const client = claudeClient();
   const model = modelFor("agent"); // fixed for the whole run
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: task }];
   for (let turn = 0; turn < 15; turn++) {

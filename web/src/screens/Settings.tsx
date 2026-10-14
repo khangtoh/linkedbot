@@ -131,6 +131,7 @@ function Claude() {
             {s.configured && (
               <span className="small muted">
                 {s.keyHint && <code className="mono">{s.keyHint}</code>} from {s.source}
+                {s.workspace && <> · workspace <code className="mono">{s.workspace}</code></>}
               </span>
             )}
           </div>

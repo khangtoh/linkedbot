@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Page } from "playwright";
 import { acquire, assertHealthy, type Lease } from "../browser.js";
-import { modelFor, supportsFallbacks } from "../claude.js";
+import { claudeClient, modelFor, supportsFallbacks } from "../claude.js";
 import { consume, humanDelay, remaining } from "../limits.js";
 import { checkNavigation, LINKEDIN_POLICY, type Policy } from "../policy.js";
 import { runRecipeOnPage, validateRecipe, type RecipeDef } from "../ops/recipe.js";
@@ -197,7 +197,7 @@ export class GenerationSession {
     const budget = this.req.budget ?? 6;
     const left = remaining();
     if (left.view_profile < budget) return this.fail(`Only ${left.view_profile} profile views are left today; a generation may use up to ${budget}.`);
-    const client = this.opts.client ?? new Anthropic();
+    const client = this.opts.client ?? claudeClient();
     const model = this.opts.model ?? modelFor("generator"); // fixed for the whole run
     this.emit({ type: "status", text: "Waiting for the browser" });
     this.lease = await acquire("interactive", "API generator");
