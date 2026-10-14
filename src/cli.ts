@@ -38,7 +38,7 @@ switch (cmd) {
     break;
   }
   case "agent":
-    await runAgent(rest.join(" "));
+    console.log(await runAgent(rest.join(" ")));
     break;
   default:
     console.log("Usage: npm run cli -- <login [--remote] | whoami | search \"keywords\" [pages] | leads [out.csv] | agent \"task\">");

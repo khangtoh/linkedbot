@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "cli": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "serve": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit false --outDir dist",
+    "start": "node dist/server.js",
+    "deploy": "scripts/deploy.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",

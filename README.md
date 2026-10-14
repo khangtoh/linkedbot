@@ -28,6 +28,7 @@ automation stops with a clear error; re-run `login`.
 - `vault.ts` encrypted session store · `limits.ts` daily caps + human delays
 - `browser.ts` session replay + health check · `actions/` typed actions
 - `agent.ts` Claude tool loop with an approval gate for side-effect actions
+- `server.ts` HTTP front for the same actions (hosted use) · `scripts/deploy.sh` InstaCloud pipeline
 
 ## Remote login (`login --remote`)
 Runs Chromium headless and streams it to a web page you open from any device (phone included).
@@ -37,3 +38,29 @@ You click/type into the stream to log in; when it reaches the feed the session i
 - Your password is typed through this connection. Reach it via localhost, an SSH tunnel
   (`ssh -L 8787:127.0.0.1:8787 server`) or an HTTPS tunnel; avoid plain HTTP over untrusted networks.
 - The browser user agent used at login is stored with the session and reused on replay.
+
+## Hosted (InstaCloud)
+The CLI runs once and exits, so the hosted form is `src/server.ts`: one container with headless
+Chromium, state on a persistent `/data` volume (`LINKEDBOT_DATA`), jobs run one at a time.
+```
+npm run deploy                        # check, package, provision, secrets, deploy, verify
+scripts/deploy.sh deploy verify       # just the named stages (redeploy after a code change)
+```
+The image is built remotely from the `Dockerfile`; no local Docker. The pipeline creates the
+project, a compute service `app` with a 1 Gi volume, and the secrets `LINKEDBOT_PASSPHRASE` and
+`LINKEDBOT_API_TOKEN` (generated once, never overwritten). `ANTHROPIC_API_KEY` is copied from your
+shell if exported. Read a value back with `insta secrets --print`.
+
+Everything except `/healthz` needs `Authorization: Bearer $LINKEDBOT_API_TOKEN`:
+```
+POST /login                 -> {url}: one-time page (10 min) streaming the login browser
+POST /jobs {"cmd":"whoami"} | {"cmd":"search","keywords":"...","pages":2} | {"cmd":"agent","task":"..."}
+GET  /jobs/<id>             -> status + result (jobs are async; poll)
+GET  /status · /leads · /leads.csv
+```
+`insta run` injects the token without writing it to disk:
+```
+insta run -- sh -c 'curl -s -X POST -H "Authorization: Bearer $LINKEDBOT_API_TOKEN" https://<app-url>/login'
+```
+Hosted runs come from a datacenter IP. Expect LinkedIn to challenge the login (complete it in the
+stream) and treat the account-restriction risk as higher than from your own machine.

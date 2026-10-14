@@ -8,7 +8,7 @@ import { normalUserAgent } from "./ua.js";
 const W = 1280, H = 800;
 const LOGIN_URL = "https://www.linkedin.com/login";
 
-const PAGE = `<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+export const LOGIN_PAGE = `<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
 <title>linkedbot login</title>
 <style>body{margin:0;background:#111;color:#ddd;font:14px system-ui}#bar{padding:8px 12px}
 canvas{width:100%;display:block;background:#222;touch-action:none}
@@ -41,11 +41,10 @@ kb.addEventListener('keydown',e=>{
 });
 </script>`;
 
-export async function remoteLogin(opts: { host?: string; port?: number } = {}): Promise<void> {
-  const host = opts.host ?? "127.0.0.1";
-  const port = opts.port ?? 8787;
-  const token = randomBytes(24).toString("hex");
-
+// Launches the headless browser and returns the WebSocket endpoint that streams it.
+// The caller owns the HTTP side (serving LOGIN_PAGE, authenticating the upgrade);
+// `done` settles once the feed is reached and the session is saved, or on timeout.
+export async function startLoginStream(): Promise<{ wss: WebSocketServer; done: Promise<void> }> {
   const browser = await chromium.launch({ headless: true });
   const userAgent = normalUserAgent(browser);
   const ctx = await browser.newContext({ viewport: { width: W, height: H }, userAgent, locale: "en-US" });
@@ -57,17 +56,7 @@ export async function remoteLogin(opts: { host?: string; port?: number } = {}): 
     await page.setContent(`<body style="font:16px system-ui;padding:40px"><h2>Could not reach LinkedIn</h2><p>Check this machine's network, then <a href="${LOGIN_URL}">retry</a>.</p>`).catch(() => {});
   });
   const clients = new Set<WebSocket>();
-  const ok = (url?: string) => new URL(url ?? "", "http://x").searchParams.get("t") === token;
-
-  const server = createServer((req, res) => {
-    if (!ok(req.url)) { res.writeHead(403).end("forbidden"); return; }
-    res.writeHead(200, { "content-type": "text/html" }).end(PAGE);
-  });
   const wss = new WebSocketServer({ noServer: true });
-  server.on("upgrade", (req, sock, head) => {
-    if (!ok(req.url)) { sock.destroy(); return; }
-    wss.handleUpgrade(req, sock, head, (ws) => wss.emit("connection", ws));
-  });
 
   wss.on("connection", (ws) => {
     clients.add(ws);
@@ -106,17 +95,40 @@ export async function remoteLogin(opts: { host?: string; port?: number } = {}): 
   await startCast();
   page.on("framenavigated", (f) => { if (f === page.mainFrame()) void startCast(); });
 
+  const done = (async () => {
+    try {
+      await page.waitForURL(/linkedin\.com\/feed/, { timeout: 10 * 60_000 });
+      saveSession(await ctx.storageState(), userAgent);
+      for (const ws of clients) ws.send(JSON.stringify({ done: true }));
+      console.log("Session saved to the encrypted vault.");
+    } finally {
+      await new Promise((r) => setTimeout(r, 500));
+      for (const ws of clients) ws.close();
+      wss.close(); await browser.close();
+    }
+  })();
+  return { wss, done };
+}
+
+export async function remoteLogin(opts: { host?: string; port?: number } = {}): Promise<void> {
+  const host = opts.host ?? "127.0.0.1";
+  const port = opts.port ?? 8787;
+  const token = randomBytes(24).toString("hex");
+  const { wss, done } = await startLoginStream();
+  const ok = (url?: string) => new URL(url ?? "", "http://x").searchParams.get("t") === token;
+
+  const server = createServer((req, res) => {
+    if (!ok(req.url)) { res.writeHead(403).end("forbidden"); return; }
+    res.writeHead(200, { "content-type": "text/html" }).end(LOGIN_PAGE);
+  });
+  server.on("upgrade", (req, sock, head) => {
+    if (!ok(req.url)) { sock.destroy(); return; }
+    wss.handleUpgrade(req, sock, head, (ws) => wss.emit("connection", ws));
+  });
+
   await new Promise<void>((r) => server.listen(port, host, r));
   console.log(`\nOpen this URL in any browser (phone works) and log in:\n  http://${host === "0.0.0.0" ? "<this-machine-ip>" : host}:${port}/?t=${token}\n`);
   console.log("Anything you type travels over this connection. Use localhost / an SSH tunnel / an HTTPS tunnel, not open Wi-Fi.\n");
 
-  try {
-    await page.waitForURL(/linkedin\.com\/feed/, { timeout: 10 * 60_000 });
-    saveSession(await ctx.storageState(), userAgent);
-    for (const ws of clients) ws.send(JSON.stringify({ done: true }));
-    console.log("Session saved to the encrypted vault.");
-  } finally {
-    await new Promise((r) => setTimeout(r, 500));
-    wss.close(); server.close(); await browser.close();
-  }
+  try { await done; } finally { server.close(); }
 }

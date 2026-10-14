@@ -40,7 +40,7 @@ async function approve(msg: string): Promise<boolean> {
   return a.trim().toLowerCase() === "y";
 }
 
-export async function runAgent(task: string): Promise<void> {
+export async function runAgent(task: string): Promise<string> {
   const client = new Anthropic();
   const s = await openSession();
   try {
@@ -56,8 +56,7 @@ export async function runAgent(task: string): Promise<void> {
       messages.push({ role: "assistant", content: res.content });
       const calls = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
       if (!calls.length) {
-        console.log(res.content.filter((b) => b.type === "text").map((b: any) => b.text).join("\n"));
-        return;
+        return res.content.filter((b) => b.type === "text").map((b: any) => b.text).join("\n");
       }
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const c of calls) {
@@ -82,6 +81,7 @@ export async function runAgent(task: string): Promise<void> {
       }
       messages.push({ role: "user", content: results });
     }
+    return "Stopped: turn limit reached before the task finished.";
   } finally {
     await s.close();
   }
