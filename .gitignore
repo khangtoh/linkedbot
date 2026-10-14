@@ -21,3 +21,4 @@ dist/
 .github/skills/
 skills-lock.json
 web/dist/
+.env.local

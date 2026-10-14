@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "cli": "tsx src/cli.ts",
-    "serve": "tsx src/server.ts",
+    "cli": "tsx --env-file-if-exists=.env.local src/cli.ts",
+    "serve": "tsx --env-file-if-exists=.env.local src/server.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
     "test": "tsx --test test/*.test.ts",
     "build": "tsc --noEmit false --outDir dist",
